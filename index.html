@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drone vs PNOA LiDAR — Santomera</title>
+<link rel="stylesheet" href="vendor/leaflet.min.css">
+<style>
+  :root{
+    --bg:#14171c; --panel:#1d2129; --panel2:#262c36; --borde:#333b47;
+    --txt:#e8eaed; --muted:#9aa4b2; --acento:#5ab0ff; --acento2:#7fd08a;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  #mapa{position:absolute;inset:0}
+  .rejilla-cv{position:absolute;left:0;top:0;z-index:500;pointer-events:none}
+  .panel{position:absolute;z-index:1000;background:color-mix(in srgb,var(--panel) 92%,transparent);
+    border:1px solid var(--borde);border-radius:10px;backdrop-filter:blur(6px)}
+  #ctrl{top:12px;left:54px;padding:10px 12px;max-width:min(96vw,720px)}
+  #ctrl h1{font-size:14px;margin:0 0 8px;font-weight:650;letter-spacing:.2px}
+  #ctrl h1 small{color:var(--muted);font-weight:400}
+  .fila{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .fila+.fila{margin-top:8px}
+  .grupo{display:flex;gap:6px;align-items:center;background:var(--panel2);
+    border:1px solid var(--borde);border-radius:8px;padding:5px 8px}
+  .grupo label{color:var(--muted);font-size:12px}
+  select,input[type=checkbox]{accent-color:var(--acento)}
+  select{background:var(--bg);color:var(--txt);border:1px solid var(--borde);
+    border-radius:6px;padding:3px 6px;font-size:13px}
+  .btn-var{border:1px solid var(--borde);background:var(--panel2);color:var(--txt);
+    border-radius:8px;padding:5px 10px;cursor:pointer;font-size:13px}
+  .btn-var.activa{background:var(--acento);border-color:var(--acento);color:#0b1521;font-weight:600}
+  #stats{top:12px;right:12px;padding:10px 14px;font-size:12.5px;min-width:210px}
+  #stats b{color:var(--acento2)}
+  #stats .tit{font-weight:650;margin-bottom:4px}
+  #stats .num{font-variant-numeric:tabular-nums}
+  #leyenda{bottom:24px;right:12px;padding:10px 12px;font-size:12px;min-width:230px}
+  #leyenda .barra{height:12px;border-radius:4px;margin:6px 0 2px;border:1px solid var(--borde)}
+  #leyenda .extremos{display:flex;justify-content:space-between;color:var(--muted);
+    font-variant-numeric:tabular-nums}
+  #nota{bottom:24px;left:54px;padding:8px 12px;font-size:11.5px;color:var(--muted);max-width:420px}
+  #ayuda{position:absolute;z-index:1100;top:70px;bottom:60px;left:50%;transform:translateX(-50%);
+    width:min(92vw,740px);overflow:auto;padding:16px 22px;font-size:13.5px}
+  #ayuda h2{font-size:13.5px;margin:14px 0 6px;color:var(--acento)}
+  #ayuda h2:first-of-type{margin-top:2px}
+  #ayuda p{margin:5px 0}
+  #ayuda ul{margin:4px 0;padding-left:18px}
+  #ayuda li{margin:4px 0}
+  #cierraAyuda{position:absolute;top:10px;right:10px;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--borde);border-radius:6px;padding:2px 9px;cursor:pointer}
+  #ficha{position:absolute;z-index:1200;max-width:360px;padding:10px 14px;font-size:12.5px}
+  #cierraFicha{position:absolute;top:6px;right:6px;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--borde);border-radius:6px;padding:0 7px;cursor:pointer}
+  #btnAyuda{margin-left:2px}
+  .leaflet-popup-content-wrapper{background:var(--panel);color:var(--txt);border-radius:10px}
+  .leaflet-popup-tip{background:var(--panel)}
+  .popup-celda{font-size:12.5px}
+  .popup-celda table{border-collapse:collapse;margin-top:4px}
+  .popup-celda td{padding:1px 8px 1px 0;font-variant-numeric:tabular-nums}
+  .popup-celda td:first-child{color:var(--muted)}
+  .falla{color:#ff7b72;font-weight:600}
+  .ok{color:var(--acento2)}
+  @media (max-width:760px){ #stats{display:none} #nota{display:none} }
+</style>
+</head>
+<body>
+<div id="mapa"></div>
+
+<div id="ctrl" class="panel">
+  <h1>Drone vs PNOA LiDAR — Santomera <small>10 m grid · learned calibration · 90% conformal interval</small></h1>
+  <div class="fila" id="vars"></div>
+  <div class="fila">
+    <span class="grupo"><label>layer</label><select id="vista"></select></span>
+    <span class="grupo" title="Pine mortality/felling between the 2023 PNOA flight and the 2026 drone flight (12.4 ha), excluded from calibration"><label>change 2023–26</label><input type="checkbox" id="ovCambio" checked></span>
+    <button id="btnAyuda" class="btn-var">? Help</button>
+  </div>
+</div>
+
+<div id="stats" class="panel"></div>
+<div id="leyenda" class="panel"></div>
+<div id="nota" class="panel">
+  Orange cells: pine mortality/felling between the 2023 PNOA flight and the
+  2026 drone flight (12.4 ha confirmed with orthophotos) — real change, not
+  measurement error, excluded from calibration. Residual = PNOA − drone
+  (red = overestimation, blue = underestimation). The 90% conformal interval
+  shown here is the global split-conformal variant over out-of-fold residuals.
+</div>
+
+<div id="ficha" class="panel" hidden></div>
+
+<div id="ayuda" class="panel" hidden>
+  <button id="cierraAyuda" title="Close">✕</button>
+  <h2>What you are looking at</h2>
+  <p>A cell-by-cell comparison of two LiDAR sources over Santomera (Murcia, Spain), aggregated
+  to a common <b>10 m grid</b>:</p>
+  <ul>
+    <li><b>Drone LiDAR (2026)</b> — 350–470 pts/m², the <b>reference</b> ("ground truth" of forest structure).</li>
+    <li><b>PNOA LiDAR (2023)</b> — Spain's national airborne coverage, ~5 pts/m², ~100× sparser.</li>
+  </ul>
+  <p>The question: <i>how wrong is the low-density national LiDAR for wildfire-fuel metrics,
+  and can a learned calibration bring it up to drone level?</i></p>
+
+  <h2>Layers</h2>
+  <ul>
+    <li><b>Drone (ground truth)</b>: the fuel metric computed from the drone point cloud.</li>
+    <li><b>PNOA raw</b>: the <i>same metric definitions</i> computed from the sparse PNOA points,
+      using PNOA's own ground surface — what you would get anywhere in Spain without a drone.</li>
+    <li><b>PNOA calibrated</b>: the raw PNOA metric passed through a gradient-boosting model trained to
+      reproduce the drone values. Shown with <b>spatially out-of-fold</b> predictions, so no cell is
+      scored by a model that saw it in training.</li>
+    <li><b>Residual (raw / calibrated)</b>: prediction − drone. <b style="color:#ef8a62">Red =
+      overestimation</b>, <b style="color:#67a9cf">blue = underestimation</b>, near-white = good agreement.
+      Switching between the two residuals shows what the calibration actually fixes.</li>
+    <li><b>Outside 90% conformal interval</b>: each calibrated cell carries a prediction interval
+      (±q). Cells in <b style="color:#ff7b72">red</b> are where the drone value falls <i>outside</i> that
+      interval — about 10% of cells are expected to fail by construction; watch whether failures
+      cluster spatially.</li>
+  </ul>
+
+  <h2>Metrics (buttons)</h2>
+  <ul>
+    <li><b>Canopy height p95</b>: 95th percentile of vegetation return heights (m).</li>
+    <li><b>Canopy cover</b>: fraction of returns above 2 m.</li>
+    <li><b>Understorey / Mid-storey</b>: fraction of vegetation returns in the 1–5 m and 5–15 m strata —
+      the layers that carry fire into the canopy.</li>
+  </ul>
+
+  <h2>Change 2023–26 (orange overlay)</h2>
+  <p>Cells where the structure <i>really changed</i> between the two flights: pine
+  mortality/felling over ~12.4 ha, confirmed with 2022–2026 orthophotos. For these cells the
+  PNOA–drone disagreement is <b>real change, not measurement error</b>, so they are excluded from
+  calibration.</p>
+  <p><b>Why do orange cells still show green underneath?</b> The overlay only tints the current
+  metric value; it does not erase it. Inside the affected patch, (a) dead trees often remain
+  <i>standing</i> — snags still return LiDAR points and still measure as canopy height — and
+  (b) at 10 m resolution a cell is only partially affected. Height only drops when trees actually
+  fall or are felled, so it is normal to see canopy values surviving inside orange cells.</p>
+
+  <h2>Panels and conventions</h2>
+  <ul>
+    <li>Top-right: MAE before/after calibration and the empirical coverage of the 90% interval.</li>
+    <li>All three sources share the <b>same colour scale</b> per metric, so switching layers is a fair
+      comparison.</li>
+    <li>Click any cell for its exact values and whether the interval covers it.</li>
+    <li>PNOA is ETRS89/UTM30 and the drone WGS84/UTM30N; the offset is &lt;1 m, negligible at 10 m.</li>
+  </ul>
+</div>
+
+<script src="vendor/leaflet.min.js"></script>
+<script src="vendor/proj4.min.js"></script>
+<script>
+"use strict";
+
+/* ---------- datos ---------- */
+let DATOS = null;
+
+const VISTAS = [
+  {id:"dron",   nombre:"Drone (ground truth)"},
+  {id:"raw",    nombre:"PNOA raw"},
+  {id:"cal",    nombre:"PNOA calibrated"},
+  {id:"res_raw",nombre:"Residual: raw PNOA − drone"},
+  {id:"res_cal",nombre:"Residual: calibrated − drone"},
+  {id:"fallos", nombre:"Outside 90% conformal interval"},
+];
+
+/* rampas */
+const RAMPA_SEQ = ["#ffffcc","#d9f0a3","#addd8e","#78c679","#41ab5d","#238443","#005a32"];   // YlGn
+const RAMPA_DIV = ["#b2182b","#ef8a62","#fddbc7","#f7f7f7","#d1e5f0","#67a9cf","#2166ac"]; // RdBu invertida
+const RGB = a => a.map(h => [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]);
+const RGB_SEQ = RGB(RAMPA_SEQ), RGB_DIV = RGB(RAMPA_DIV);
+
+function colorRampa(rgb, t){ // t en [0,1]
+  t = Math.min(1, Math.max(0, t));
+  const n = rgb.length - 1, p = t * n, i = Math.min(n-1, Math.floor(p)), f = p - i;
+  const a = rgb[i], b = rgb[i+1];
+  return [a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f, a[2]+(b[2]-a[2])*f];
+}
+
+/* escala por variable: mismo dominio para dron, raw y cal (comparación honesta) */
+let escalas = {};
+function calcularEscalas(){
+  escalas = {};
+  for (const varr in DATOS.vars){
+    const v = DATOS.vars[varr];
+    const vals = [...v.dron, ...v.raw, ...v.cal].filter(x => x != null).sort((a,b)=>a-b);
+    const p = q => vals[Math.min(vals.length-1, Math.max(0, Math.floor(q*(vals.length-1))))];
+    const res = [];
+    for (let i=0;i<v.dron.length;i++){
+      if (v.dron[i]!=null && v.raw[i]!=null) res.push(Math.abs(v.raw[i]-v.dron[i]));
+    }
+    res.sort((a,b)=>a-b);
+    const rmax = res.length ? res[Math.floor(0.98*(res.length-1))] : 1;
+    escalas[varr] = {min:p(0.02), max:p(0.98), resMax:Math.max(rmax, v.q90*1.05), q:v.q90};
+  }
+}
+
+/* ---------- mapa ---------- */
+proj4.defs("EPSG:25830","+proj=utm +zone=30 +ellps=GRS80 +units=m +no_defs +type=crs");
+const utm2ll = (x,y) => { const [lon,lat] = proj4("EPSG:25830","EPSG:4326",[x,y]); return L.latLng(lat,lon); };
+
+const mapa = L.map("mapa",{zoomControl:true, attributionControl:true, minZoom:12, maxZoom:19});
+const ign = L.tileLayer(
+  "https://www.ign.es/wmts/pnoa-ma?Service=WMTS&Request=GetTile&Version=1.0.0&layer=OI.OrthoimageCoverage&style=default&tilematrixset=GoogleMapsCompatible&Format=image/jpeg&TileMatrix={z}&TileCol={x}&TileRow={y}",
+  {maxZoom:19, attribution:"Ortofoto © IGN/CNIG (PNOA)"});
+const carto = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  {maxZoom:19, attribution:"© OpenStreetMap · © CARTO"});
+ign.addTo(mapa);
+L.control.layers({"Ortofoto IGN":ign, "Oscuro (CARTO)":carto}, null, {position:"topleft"}).addTo(mapa);
+
+/* ---------- capa de rejilla en canvas ---------- */
+function capaRejilla(){
+  // canvas fijo sobre el contenedor del mapa (recorte con clip-path para la cortina)
+  const cv = L.DomUtil.create("canvas","rejilla-cv",mapa.getContainer());
+  const estado = {vista:"dron", varActual:"p95", cv};
+  function redibujar(){
+    const size = mapa.getSize();
+    cv.width = size.x; cv.height = size.y;
+    const ctx = cv.getContext("2d");
+    ctx.clearRect(0,0,size.x,size.y);
+    const m = DATOS.meta, varr = estado.varActual, v = DATOS.vars[varr], esc = escalas[varr];
+    const W = m.nx*m.cell, H = m.ny*m.cell;
+    // esquinas UTM -> punto de capa; la rejilla se coloca por interpolacion bilineal
+    // (la curvatura UTM->latlon a 2 km de escala es < 1 px)
+    const NW = mapa.latLngToContainerPoint(utm2ll(m.x0,   m.y_top));
+    const NE = mapa.latLngToContainerPoint(utm2ll(m.x0+W, m.y_top));
+    const SW = mapa.latLngToContainerPoint(utm2ll(m.x0,   m.y_top-H));
+    const SE = mapa.latLngToContainerPoint(utm2ll(m.x0+W, m.y_top-H));
+    for (let r=0;r<m.ny;r++){
+      const t0 = r/m.ny, t1 = (r+1)/m.ny;
+      const ax = NW.x+(SW.x-NW.x)*t0, ay = NW.y+(SW.y-NW.y)*t0;
+      const bx = NE.x+(SE.x-NE.x)*t0, by = NE.y+(SE.y-NE.y)*t0;
+      const alto = Math.max(0.6, ((NW.y+(SW.y-NW.y)*t1)+(NE.y+(SE.y-NE.y)*t1))/2 - ((ay+by)/2) + 0.5);
+      for (let c=0;c<m.nx;c++){
+        const i = r*m.nx + c;
+        const col = colorCelda(varr, i, estado.vista, esc, DATOS.cambio[i]);
+        if (!col) continue;
+        const s0 = c/m.nx, s1 = (c+1)/m.nx;
+        const px = ax+(bx-ax)*s0, py = ay+(by-ay)*s0;
+        const ancho = Math.max(1, (ax+(bx-ax)*s1) - px + 0.5);
+        ctx.fillStyle = col;
+        ctx.fillRect(px, py, ancho, alto);
+      }
+    }
+    estado.anchor = {x: NW.x, y: NW.y}; // referencia para trasladar el canvas durante el pan
+  }
+  estado.redibujar = redibujar;
+  return estado;
+}
+
+function colorCelda(varr, i, vista, esc, hayCambio){
+  const v = DATOS.vars[varr];
+  const y = v.dron[i], raw = v.raw[i], cal = v.cal[i];
+  let rgb = null, alfa = 0.82;
+  if (vista==="dron"   && y   != null) rgb = colorRampa(RGB_SEQ,(y-esc.min)/(esc.max-esc.min));
+  if (vista==="raw"    && raw != null) rgb = colorRampa(RGB_SEQ,(raw-esc.min)/(esc.max-esc.min));
+  if (vista==="cal"    && cal != null) rgb = colorRampa(RGB_SEQ,(cal-esc.min)/(esc.max-esc.min));
+  if (vista==="res_raw" && y!=null && raw!=null){
+    const d = raw-y; rgb = colorRampa(RGB_DIV, 0.5 - 0.5*d/esc.resMax); // rojo = sobreestima
+  }
+  if (vista==="res_cal" && y!=null && cal!=null){
+    const d = cal-y; rgb = colorRampa(RGB_DIV, 0.5 - 0.5*d/esc.resMax);
+  }
+  if (vista==="fallos"){
+    if (y!=null && cal!=null){
+      if (Math.abs(cal-y) > esc.q){ rgb = [229,57,53]; alfa = 0.85; }
+      else { rgb = [140,180,140]; alfa = 0.18; } // dentro del IC, casi transparente
+    }
+  }
+  if (hayCambio && document.getElementById("ovCambio").checked && rgb){
+    rgb = [ (rgb[0]+255)/2, 140, (rgb[2]*0.4) ]; // tinte naranja
+    alfa = Math.min(1, alfa+0.1);
+  }
+  if (hayCambio && document.getElementById("ovCambio").checked && !rgb && vista==="fallos"){
+    rgb = [255,150,40]; alfa = 0.55;
+  }
+  return rgb ? `rgba(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0},${alfa})` : null;
+}
+
+/* una capa; se traslada con el pan y se repinta al soltar */
+let capa, varActual = "p95";
+function redibujarTodo(){
+  if (!DATOS || !capa) return; // fitBounds dispara zoomend antes de crear la capa
+  capa.varActual = varActual;
+  capa.vista = document.getElementById("vista").value;
+  capa.redibujar(); leyenda(); stats();
+}
+mapa.on("move", () => { // trasladar el canvas con el arrastre (sin repintar)
+  if (!capa || !capa.anchor) return;
+  const m = DATOS.meta;
+  const nw = mapa.latLngToContainerPoint(utm2ll(m.x0, m.y_top));
+  capa.cv.style.transform = `translate(${nw.x - capa.anchor.x}px, ${nw.y - capa.anchor.y}px)`;
+});
+mapa.on("moveend zoomend resize", () => { if (capa) capa.cv.style.transform = ""; redibujarTodo(); });
+mapa.on("zoomanim", () => { // atenua la rejilla durante la animación de zoom
+  if (capa) capa.cv.style.opacity = .35;
+});
+mapa.on("zoomend", () => { if (capa) capa.cv.style.opacity = 1; });
+
+/* ---------- UI ---------- */
+function construirUI(){
+  const vars = document.getElementById("vars");
+  for (const id in DATOS.vars){
+    const b = document.createElement("button");
+    b.className = "btn-var"+(id===varActual?" activa":"");
+    b.textContent = DATOS.vars[id].nombre;
+    b.onclick = () => { varActual = id;
+      vars.querySelectorAll(".btn-var").forEach(e=>e.classList.remove("activa"));
+      b.classList.add("activa"); redibujarTodo(); };
+    vars.appendChild(b);
+  }
+  const s = document.getElementById("vista");
+  for (const t of VISTAS){ const o=document.createElement("option"); o.value=t.id; o.textContent=t.nombre; s.appendChild(o); }
+  s.value = "dron";
+  s.onchange = redibujarTodo;
+  document.getElementById("ovCambio").onchange = redibujarTodo;
+
+  const ayuda = document.getElementById("ayuda");
+  document.getElementById("btnAyuda").onclick = () => ayuda.hidden = false;
+  document.getElementById("cierraAyuda").onclick = () => ayuda.hidden = true;
+  document.addEventListener("keydown", e => { if (e.key === "Escape"){ ayuda.hidden = true; document.getElementById("ficha").hidden = true; } });
+}
+
+function gradienteCSS(rgb){
+  const pasos = rgb.map((c,i)=>`rgb(${c[0]},${c[1]},${c[2]}) ${Math.round(100*i/(rgb.length-1))}%`);
+  return `linear-gradient(90deg, ${pasos.join(",")})`;
+}
+function leyenda(){
+  const esc = escalas[varActual], v = DATOS.vars[varActual];
+  const vista = document.getElementById("vista").value;
+  const residuo = vista.startsWith("res_");
+  const fallos = vista==="fallos";
+  let html;
+  if (fallos && !residuo){
+    html = `<b>90% conformal interval</b> (±${esc.q.toFixed(2)} ${v.unidad})
+      <div class="barra" style="background:linear-gradient(90deg,#e53935 0 50%, #8cb48c 50% 100%)"></div>
+      <div class="extremos"><span style="color:#ff7b72">outside</span><span style="color:#8cb48c">inside</span></div>`;
+  } else if (residuo){
+    html = `<b>Residual (PNOA − drone)</b> [${v.unidad}]
+      <div class="barra" style="background:${gradienteCSS(RGB_DIV)}"></div>
+      <div class="extremos"><span>+${esc.resMax.toFixed(2)} (overest.)</span><span>0</span><span>−${esc.resMax.toFixed(2)}</span></div>`;
+  } else {
+    html = `<b>${v.nombre}</b> [${v.unidad}]
+      <div class="barra" style="background:${gradienteCSS(RGB_SEQ)}"></div>
+      <div class="extremos"><span>${esc.min.toFixed(2)}</span><span>${esc.max.toFixed(2)}</span></div>
+      <div style="color:var(--muted)">same scale for drone, PNOA and calibrated</div>`;
+  }
+  document.getElementById("leyenda").innerHTML = html;
+}
+function stats(){
+  const s = DATOS.stats[varActual];
+  document.getElementById("stats").innerHTML = `
+    <div class="tit">${DATOS.vars[varActual].nombre}</div>
+    <div class="num">Raw PNOA MAE:   ${s.mae_raw.toFixed(3)}</div>
+    <div class="num">Calibrated MAE: <b>${s.mae_cal.toFixed(3)}</b> (${s.mejora_pct>=0?"−":"+"}${Math.abs(s.mejora_pct).toFixed(1)}%)</div>
+    <div class="num">90% interval: empirical coverage ${s.cobertura_ic}%</div>
+    <div class="num" style="color:var(--muted)">n = ${s.n_oof} out-of-fold cells</div>`;
+}
+
+/* ---------- ficha de celda (panel propio, por encima de la rejilla) ---------- */
+mapa.on("click", e => {
+  if (!DATOS) return;
+  const m = DATOS.meta;
+  const [x,y] = proj4("EPSG:4326","EPSG:25830",[e.latlng.lng, e.latlng.lat]);
+  const c = Math.floor((x - m.x0)/m.cell), r = Math.floor((m.y_top - y)/m.cell);
+  if (r<0||c<0||r>=m.ny||c>=m.nx) return;
+  const i = r*m.nx + c;
+  const filas = [];
+  for (const id in DATOS.vars){
+    const v = DATOS.vars[id], d=v.dron[i], rw=v.raw[i], cl=v.cal[i];
+    if (d==null && rw==null) continue;
+    const f = n => n==null ? "—" : n.toFixed(id==="p95"?2:3);
+    let ic = "";
+    if (cl!=null && d!=null){
+      const dentro = Math.abs(cl-d) <= v.q90;
+      ic = dentro ? `<span class="ok">✔ in PI</span>` : `<span class="falla">✘ outside</span>`;
+    }
+    filas.push(`<tr><td>${v.nombre}</td><td>${f(d)}</td><td>${f(rw)}</td><td>${f(cl)}</td><td>${ic}</td></tr>`);
+  }
+  if (!filas.length) return;
+  const cambioTxt = DATOS.cambio[i] ? `<div style="color:#ffb84d;margin-top:4px">⚠ structural change 2023–2026 (pine mortality/felling; excluded from calibration)</div>` : "";
+  const ficha = document.getElementById("ficha");
+  ficha.innerHTML = `<button id="cierraFicha" title="Close">✕</button>
+    <div class="popup-celda"><b>Cell ${(x-5)|0}, ${(y-5)|0}</b> (ETRS89 UTM30, SW corner)
+    <table><tr><td></td><td><b>drone</b></td><td><b>PNOA</b></td><td><b>cal.</b></td><td></td></tr>
+    ${filas.join("")}</table>${cambioTxt}</div>`;
+  ficha.hidden = false;
+  const pt = mapa.latLngToContainerPoint(e.latlng), sz = mapa.getSize();
+  ficha.style.left = Math.min(Math.max(8, pt.x+16), sz.x-340)+"px";
+  ficha.style.top  = Math.min(Math.max(8, pt.y+16), sz.y-230)+"px";
+  document.getElementById("cierraFicha").onclick = () => ficha.hidden = true;
+});
+mapa.on("movestart", () => document.getElementById("ficha").hidden = true);
+
+/* ---------- carga ---------- */
+fetch("datos/rejilla.json").then(r=>r.json()).then(d => {
+  DATOS = d; calcularEscalas();
+  const m = d.meta;
+  mapa.fitBounds(L.latLngBounds(utm2ll(m.x0, m.y_top - m.ny*m.cell), utm2ll(m.x0 + m.nx*m.cell, m.y_top)));
+  capa = capaRejilla();
+  construirUI(); redibujarTodo();
+});
+</script>
+</body>
+</html>
